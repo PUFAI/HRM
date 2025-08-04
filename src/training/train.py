@@ -1,8 +1,12 @@
+"""
+python train.py   --stream_repo HuggingFaceFW/fineweb   --tokenizer_path ../scripts/tokenizer_sp/tokenizer.model   --seq_len 512   --batch_size 2   --total_steps 10000   --devices 1
+"""
 import argparse
 import sys
 from pathlib import Path
 from typing import Optional
 
+import sentencepiece as spm
 import torch
 import torch.nn.functional as F
 import pytorch_lightning as pl
@@ -14,12 +18,13 @@ from transformers import (
     get_cosine_schedule_with_warmup,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+    sys.path.append(str(PROJECT_ROOT))
+print(f"sys.path: {sys.path}")
 
 from hrm import HierarchicalReasoningModel
-from datasets import HFStreamDataset
+from training_datasets import LimitedStream, HFStreamDataset
 
 class TokenDataset(Dataset):
     def __init__(self, files, seq_len: int = 2048):
@@ -89,11 +94,33 @@ class HRMDataModule(pl.LightningDataModule):
         self.val_set: Optional[torch.utils.data.Dataset] = None
 
     def _load_tokenizer(self):
+        path_arg = getattr(self.args, "tokenizer_path", None)
+
         if self.args.tokenizer_name:
             return AutoTokenizer.from_pretrained(self.args.tokenizer_name, use_fast=True)
-        if Path(self.args.tokenizer_path).exists():
-            return PreTrainedTokenizerFast(tokenizer_file=self.args.tokenizer_path)
-        raise FileNotFoundError("No tokenizer specified. Provide --tokenizer_name or --tokenizer_path.")
+
+        if not path_arg:
+            raise FileNotFoundError("Provide --tokenizer_name or --tokenizer_path")
+
+        path = Path(path_arg)
+        if not path.exists():
+            raise FileNotFoundError(path)
+
+        if path.suffix == ".json":
+            return PreTrainedTokenizerFast(tokenizer_file=str(path))
+
+        if path.suffix == ".model":
+            sp = spm.SentencePieceProcessor()
+            sp.load(str(path))
+            class _SPWrapper:
+                def __init__(self, sp_proc):
+                    self.sp = sp_proc
+                def encode(self, text, add_special_tokens=False):
+                    return self.sp.encode(text, out_type=int)
+
+            return _SPWrapper(sp)
+
+        raise ValueError(f"Unsupported tokenizer file type: {path.suffix}")
 
     def setup(self, stage=None):
         if stage in ("fit", None):
@@ -112,6 +139,10 @@ class HRMDataModule(pl.LightningDataModule):
                         tokenizer=tokenizer,
                         seq_len=self.args.seq_len,
                     )
+                
+                else:
+                    val_limit = getattr(self.args, "val_limit", 1024)
+                    self.val_set = LimitedStream(self.train_set, limit=val_limit)
             else:
                 train_files = sorted(Path(self.args.train_dir).glob("*.pt"))
                 val_files = sorted(Path(self.args.val_dir).glob("*.pt")) if self.args.val_dir else []
@@ -130,15 +161,17 @@ class HRMDataModule(pl.LightningDataModule):
 
     def val_dataloader(self):
         if self.val_set is None:
-            return None
+            return []
         is_iter = isinstance(self.val_set, IterableDataset)
+        num_workers = self.args.num_workers
         return DataLoader(
             self.val_set,
             batch_size=self.args.batch_size,
             shuffle=False,
-            num_workers=self.args.num_workers,
+            num_workers=num_workers,
             pin_memory=True,
         )
+
 
 def parse_args():
     p = argparse.ArgumentParser(description="Train Hierarchical Reasoning Model")
@@ -155,7 +188,7 @@ def parse_args():
 
     p.add_argument("--seq_len", type=int, default=2048)
     p.add_argument("--batch_size", type=int, default=4)
-    p.add_argument("--num_workers", type=int, default=4)
+    p.add_argument("--num_workers", type=int, default=0)
 
     p.add_argument("--vocab_size", type=int, default=32000)
     p.add_argument("--d_model", type=int, default=768)
@@ -175,6 +208,8 @@ def parse_args():
     p.add_argument("--precision", type=str, default="bf16")
     p.add_argument("--devices", type=int, default=1)
     p.add_argument("--strategy", type=str, default="auto")
+    p.add_argument("--val_limit", type=int, default=1024) 
+
 
     return p.parse_args()
 
