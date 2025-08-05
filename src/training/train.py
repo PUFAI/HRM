@@ -1,14 +1,15 @@
 """
-python train.py   --stream_repo HuggingFaceFW/fineweb   --tokenizer_path ../scripts/tokenizer_sp/tokenizer.model   --seq_len 512   --batch_size 2   --total_steps 10000   --devices 1
+python train.py --stream_repo HuggingFaceFW/fineweb --tokenizer_path ../scripts/tokenizer_fast/tokenizer.json --seq_len 512 --batch_size 2 --total_steps 10000 --devices 1 --precision 16-mixed --seq_len 1024 --accumulate_grad_batches 4 --batch_size 8 --num_workers 8
 """
 import argparse
 import sys
 from pathlib import Path
 from typing import Optional
 
-import sentencepiece as spm
 import torch
 import torch.nn.functional as F
+from datasets import DownloadConfig
+import sentencepiece as spm
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.optim import AdamW
@@ -126,12 +127,17 @@ class HRMDataModule(pl.LightningDataModule):
     def setup(self, stage=None):
         if stage in ("fit", None):
             if self.args.stream_repo:
-                tokenizer = self._load_tokenizer()
+                tokenizer = self._load_tokenizer()               
+                dl_cfg = DownloadConfig(
+                    max_retries=20,
+                    resume_download=True,
+                )
                 self.train_set = HFStreamDataset(
                     repo=self.args.stream_repo,
                     split=self.args.stream_split_train,
                     tokenizer=tokenizer,
                     seq_len=self.args.seq_len,
+                    download_config=dl_cfg,
                 )
                 if self.args.stream_split_val:
                     self.val_set = HFStreamDataset(
@@ -204,6 +210,7 @@ def parse_args():
     p.add_argument("--weight_decay", type=float, default=0.1)
     p.add_argument("--warmup_steps", type=int, default=2_000)
     p.add_argument("--total_steps", type=int, default=200_000)
+    p.add_argument("--accumulate_grad_batches", type=int, default=1)
 
     p.add_argument("--max_epochs", type=int, default=1)
     p.add_argument("--precision", type=str, default="bf16")
@@ -219,7 +226,10 @@ def main():
     pl.seed_everything(42)
 
     dm = HRMDataModule(args)
+    
+    torch.backends.cuda.enable_flash_sdp(True)
     model = HRMLitModule(args)
+    model = torch.compile(model)
     
     ckpt_cb = ModelCheckpoint(
         dirpath="checkpoints",          
@@ -237,6 +247,7 @@ def main():
         gradient_clip_val=1.0,
         log_every_n_steps=50,
         callbacks=[ckpt_cb],
+        accumulate_grad_batches=args.accumulate_grad_batches,
     )
 
     trainer.fit(model, dm)

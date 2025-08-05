@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Iterator, Tuple
 
 import torch
-from datasets import load_dataset
+from datasets import load_dataset, DownloadConfig
 from torch.utils.data import IterableDataset
 from torch.utils.data import IterableDataset
 
@@ -44,6 +44,7 @@ class HFStreamDataset(IterableDataset):
         split: str,
         tokenizer,
         seq_len: int = 2048,
+        download_config = None,
         **streaming_kwargs,
     ):
         super().__init__()
@@ -51,6 +52,7 @@ class HFStreamDataset(IterableDataset):
         self.split = split
         self.tokenizer = tokenizer
         self.seq_len = seq_len
+        self.download_config = download_config
         self.streaming_kwargs = streaming_kwargs
 
     def _tokenise_text(self, text: str):
@@ -63,6 +65,7 @@ class HFStreamDataset(IterableDataset):
             self.repo,
             split=self.split,
             streaming=True,
+            download_config=self.download_config,
             **self.streaming_kwargs,
         )
         buffer = []

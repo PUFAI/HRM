@@ -14,7 +14,7 @@ from pathlib import Path
 
 import datasets
 import sentencepiece as spm
-from tokenizers import Tokenizer  
+from tokenizers import SentencePieceUnigramTokenizer  
 from transformers import PreTrainedTokenizerFast
 
 def stream_to_text(repo: str, split: str, limit: int, tmp_path: Path):
@@ -48,12 +48,13 @@ def train_sentencepiece(corpus_path: Path, output_dir: Path, vocab_size: int):
 
 
 def export_fast_tokenizer(sp_model_path: Path, output_dir: Path):
-    tok = Tokenizer.from_file(str(sp_model_path))
+    tok = SentencePieceUnigramTokenizer.from_file(str(sp_model_path))
+
     hf_tok = PreTrainedTokenizerFast(
         tokenizer_object=tok,
-        unk_token="<unk>",  # id 0
-        pad_token="<pad>",  # id 1
+        unk_token="<unk>", pad_token="<pad>",
     )
+
     hf_tok.save_pretrained(output_dir)
 
 def main():
@@ -76,7 +77,7 @@ def main():
     sp_model_path = train_sentencepiece(tmp_path, out_dir, args.vocab_size)
 
     print("Exporting Hugging Face fast tokenizer …")
-    export_fast_tokenizer(sp_model_path, out_dir)
+    # export_fast_tokenizer(sp_model_path, out_dir)
 
     print("All files saved to", out_dir.resolve())
 
