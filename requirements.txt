@@ -52,10 +52,6 @@ sentencepiece==0.2.0
 six==1.17.0
 sympy==1.13.3
 tokenizers==0.21.4
-torch==2.7.1+cu128
-torchaudio==2.7.1+cu128
-torchmetrics==1.8.0
-torchvision==0.22.1+cu128
 tqdm==4.67.1
 transformers==4.54.1
 triton==3.3.1
@@ -68,3 +64,7 @@ sentencepiece
 lightning
 transformers
 datasets
+torch==2.7.1+cu128
+torchaudio==2.7.1+cu128
+torchmetrics==1.8.0
+torchvision==0.22.1+cu128
