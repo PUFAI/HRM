@@ -10,6 +10,7 @@ import sentencepiece as spm
 import torch
 import torch.nn.functional as F
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset, IterableDataset
 from transformers import (
@@ -219,6 +220,14 @@ def main():
 
     dm = HRMDataModule(args)
     model = HRMLitModule(args)
+    
+    ckpt_cb = ModelCheckpoint(
+        dirpath="checkpoints",          
+        filename="hrm-{epoch:02d}-{train_loss_step:.3f}",
+        save_top_k=-1,                 
+        save_on_train_epoch_end=True,  
+        every_n_train_steps=5000,      
+    )
 
     trainer = pl.Trainer(
         max_epochs=args.max_epochs,
@@ -227,6 +236,7 @@ def main():
         strategy=args.strategy,
         gradient_clip_val=1.0,
         log_every_n_steps=50,
+        callbacks=[ckpt_cb],
     )
 
     trainer.fit(model, dm)
